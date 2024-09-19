@@ -1,7 +1,7 @@
 import argparse
 import boto3
 import botocore
-from utils.digger import dig, log_error, log_warning
+from cloudshovel.utils.digger import dig, log_error, log_warning
 
 def parse_args():
     parser = argparse.ArgumentParser(description="CloudShovel: Digging for secrets in public AMIs")
@@ -54,7 +54,7 @@ def create_boto3_session(args):
         exit()
 
 
-if __name__ == '__main__':
+def main():
     args = parse_args()
 
     print(f"AMI ID: {args.ami_id}")
@@ -64,4 +64,7 @@ if __name__ == '__main__':
     session = create_boto3_session(args)
     
     dig(args, session)
+
+if __name__ == '__main__':
+    main()
     

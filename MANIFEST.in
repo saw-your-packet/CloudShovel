@@ -1,0 +1,6 @@
+include LICENSE
+include README.md
+include requirements.txt
+recursive-include src/cloudshovel/utils/bash_scripts *.sh
+recursive-include src *.py
+global-include *.py

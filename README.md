@@ -1,21 +1,21 @@
-# CloudShovel: Digging for Secrets in Public AMIs
-
-## Table of Contents
-- [CloudShovel: Digging for Secrets in Public AMIs](#cloudshovel-digging-for-secrets-in-public-amis)
-  - [Table of Contents](#table-of-contents)
-  - [Introduction](#introduction)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Usage](#usage)
-  - [How It Works](#how-it-works)
-  - [Resources Created](#resources-created)
-  - [Required Permissions](#required-permissions)
-  - [Cleaning Up](#cleaning-up)
-  - [Troubleshooting](#troubleshooting)
-
 ## Introduction
 
 CloudShovel is a tool designed to search for sensitive information within public Amazon Machine Images (AMIs). It automates the process of launching instances from target AMIs, mounting their volumes, and scanning for potential secrets or sensitive data.
+
+Table of Contents:
+
+- [Introduction](#introduction)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+  - [Using pip](#using-pip)
+  - [Manually](#manually)
+- [Usage](#usage)
+- [How It Works](#how-it-works)
+- [Resources Created](#resources-created)
+- [Required Permissions](#required-permissions)
+- [Cleaning Up](#cleaning-up)
+- [Troubleshooting](#troubleshooting)
+
 
 ## Prerequisites
 
@@ -28,6 +28,15 @@ Before using CloudShovel, ensure you have the following:
   - Colorama library installed (`pip install colorama`)
 
 ## Installation
+
+### Using pip
+From terminal:
+
+   ```bash
+   python3 -m pip install cloudshovel
+   ```
+
+### Manually
 
 1. Clone the CloudShovel repository:
    ```
@@ -45,7 +54,7 @@ Before using CloudShovel, ensure you have the following:
 To use CloudShovel, run the `main.py` script with the following syntax:
 
 ```
-python main.py <ami_id> --bucket <s3_bucket_name> [--profile <aws_profile> | --access-key <access_key> --secret-key <secret_key> (--session-token <session_token>)] [--region <aws_region>]
+cloudshovel <ami_id> --bucket <s3_bucket_name> [--profile <aws_profile> | --access-key <access_key> --secret-key <secret_key> (--session-token <session_token>)] [--region <aws_region>]
 ```
 
 Arguments:
@@ -63,7 +72,7 @@ If you don't specify an argument for authentication, the tool will try to automa
 
 Example:
 ```
-python main.py ami-1234567890abcdef --bucket my-cloudshovel-results --profile my-aws-profile --region us-west-2
+cloudshovel ami-1234567890abcdef --bucket my-cloudshovel-results --profile my-aws-profile --region us-west-2
 ```
 
 ## How It Works
