@@ -560,7 +560,7 @@ def dig(args, session):
             log_error("An error occurred while deleting the volumes. Please check manually what happened.")
     else:
         upload_results(instance_id_secret_searcher, instance['ami'], region)
-        log_success(f'Total duration for ami {target_ami['ImageId']}: {int((time.time() - start_scan_time))} seconds\n')
+        log_success(f"Total duration for ami {target_ami['ImageId']}: {int((time.time() - start_scan_time))} seconds")
         log_success(f'Scan finished. Check results in s3://{s3_bucket_name}')
     finally:
         cleanup(region)
