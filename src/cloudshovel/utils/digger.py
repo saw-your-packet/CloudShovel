@@ -42,11 +42,12 @@ def get_ami(ami_id, region):
         if len(response['Images']) > 0:
             ami = response['Images'][0]
             log_success(f"AMI {ami_id} found in region {region}")
+            log_success(f"AMI JSON Object: {ami}")
             return ami
         else:
             log_error(f"AMI {ami_id} not found in region {region}. Exiting...")
+            cleanup(region)
             exit()
-        
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
@@ -56,6 +57,8 @@ def get_ami(ami_id, region):
             log_error(f"AMI {ami_id} not found in region {region}. Exiting...")
         else:
             log_error(f"Unexpected error: {error_message}. Exiting...")
+
+        cleanup(region)
         exit()
 
 def create_s3_bucket(region):
@@ -76,6 +79,7 @@ def create_s3_bucket(region):
         error_code = e.response['Error']['Code']
         if error_code == 'BucketAlreadyExists':
             log_error(f'Bucket {s3_bucket_name} already exists and is owned by somebody else. Please modify the bucket name and run the script again.')
+            cleanup(region)
             exit()
         else:
             log_error('Unknown error occurred. Execution might continue as expected...')
@@ -86,7 +90,7 @@ def upload_script_to_bucket(script_name):
     s3 = boto3_session.client('s3')
     response = s3.list_objects_v2(Bucket=s3_bucket_name, Prefix=script_name)
 
-    if 'Contents' in response == True:
+    if 'Contents' in response:
         log_success(f'Script found')
         return
     
@@ -100,8 +104,7 @@ def upload_script_to_bucket(script_name):
     log_success(f'Script {script_name} uploaded in bucket {s3_bucket_name}')
 
 
-
-def get_instance_profile_secret_searcher():
+def get_instance_profile_secret_searcher(region):
     iam = boto3_session.client('iam')
     log_success(f'Checking if role {secret_searcher_role_name} for Secret Searcher instance exists')
 
@@ -112,6 +115,7 @@ def get_instance_profile_secret_searcher():
     except ClientError as e:
         if e.response['Error']['Code'] != 'NoSuchEntity':
             log_error(f'Unknown error: {e["Error"]["Code"]}. Exiting...')
+            cleanup(region)
             exit()
         
         log_warning('Role doesn\'t exist. Creating...')
@@ -145,6 +149,7 @@ def get_instance_profile_secret_searcher():
 
         if e.response['Error']['Code'] != 'NoSuchEntity':
             log_error(f'Unknown error: {e["Error"]["Code"]}. Exiting...')
+            cleanup(region)
             exit()
         
         log_warning('Creating instance profile...')
@@ -227,30 +232,32 @@ def create_secret_searcher(region, instance_profile_arn):
     return instance_id
 
 
-def install_searching_tools(instance_id, region):
+def install_searching_tools(instance_id, region, is_windows=False):
     log_success(f'Installing tools on Secret Searcher instance {instance_id} for searching secrets...')
     ssm = boto3_session.client('ssm', region)
     
     # Download the script at /home/ec2-user/ and execute it
-    command = ssm.send_command(InstanceIds=[instance_id],
-                            DocumentName='AWS-RunRemoteScript',
-                            Parameters={
-                                'sourceType': ['S3'],
-                                'sourceInfo': [f'{{"path":"https://{s3_bucket_name}.s3.{region}.amazonaws.com/{install_ntfs_3g_script_name}"}}'],
-                                'commandLine': [f'bash /home/ec2-user/{install_ntfs_3g_script_name}'],
-                                'workingDirectory': ['/home/ec2-user/']
-                                })
-    
-    log_success('Installation started. Waiting for completion...')
-    waiter = ssm.get_waiter('command_executed')
-    waiter.wait(CommandId=command['Command']['CommandId'], InstanceId=instance_id, WaiterConfig={'Delay':15, 'MaxAttempts':60})
+    if is_windows:
+        command = ssm.send_command(InstanceIds=[instance_id],
+                                DocumentName='AWS-RunRemoteScript',
+                                Parameters={
+                                    'sourceType': ['S3'],
+                                    'sourceInfo': [f'{{"path":"https://{s3_bucket_name}.s3.{region}.amazonaws.com/{install_ntfs_3g_script_name}"}}'],
+                                    'commandLine': [f'bash /home/ec2-user/{install_ntfs_3g_script_name}'],
+                                    'workingDirectory': ['/home/ec2-user/']
+                                    })
+        
+        log_success('Installation started. Waiting for completion...')
+        waiter = ssm.get_waiter('command_executed')
+        waiter.wait(CommandId=command['Command']['CommandId'], InstanceId=instance_id, WaiterConfig={'Delay':15, 'MaxAttempts':60})
 
-    output = ssm.get_command_invocation(CommandId=command['Command']['CommandId'], InstanceId=instance_id)
-    log_success(f'Command execution finished with status: {output["Status"]}')
+        output = ssm.get_command_invocation(CommandId=command['Command']['CommandId'], InstanceId=instance_id)
+        log_success(f'Command execution finished with status: {output["Status"]}')
 
-    if output['Status'] != 'Success':
-        log_error(f'Installation failed. Please check what went wrong or install it manually and disable this step. Exiting...')
-        exit()
+        if output['Status'] != 'Success':
+            log_error(f'Installation failed. Please check what went wrong or install it manually and disable this step. Exiting...')
+            cleanup()
+            exit()
 
     log_success(f'Copying {scanning_script_name} from S3 bucket {s3_bucket_name} to Secret Searcher instance {instance_id} using SSM...')
     bash_command = f"if test -f /home/ec2-user/{scanning_script_name}; then echo '[INFO] Script already present on disk';else aws --region {region} s3 cp s3://{s3_bucket_name}/{scanning_script_name} /home/ec2-user/{scanning_script_name} && chmod +x /home/ec2-user/{scanning_script_name}; fi"
@@ -332,8 +339,9 @@ def start_instance_with_target_ami(ami_object, region, is_ena=False):
             return start_instance_with_target_ami(ami_object, region, is_ena=True)
         else:
             log_error(f"Something went wrong when launching instance with AMI {ami_object['ImageId']}: {str(e)}")
+            log_error("To fix this you might need to edit the script and change the instance type to be compatible with the AMIs requirements. Check instance types here: https://aws.amazon.com/ec2/instance-types/")
             log_error("Script can't resume execution and will exit...")
-
+            cleanup()
             exit()
 
 def stop_instance(instance_ids, region):
@@ -461,7 +469,7 @@ def delete_volumes(volume_ids, region):
 
 
 def cleanup(region):
-    log_success('Starting cleanup (the S3 bucket will not be deleted)...')
+    log_warning('Starting cleanup (the S3 bucket will not be deleted)...')
     ec2 = boto3_session.client('ec2', region)
 
     log_success('Deleting EC2 secret searcher instance...')
@@ -512,24 +520,29 @@ def dig(args, session):
     global s3_bucket_name
     s3_bucket_name = args.bucket
     region = args.region
-
-    log_warning("If ran in an EC2 instance, make sure it has the required permissions to execute the tool")
-    target_ami = get_ami(args.ami_id, region)
-
-    instance_profile_arn_secret_searcher = get_instance_profile_secret_searcher()
-    instance_id_secret_searcher = create_secret_searcher(region, instance_profile_arn_secret_searcher)
-    create_s3_bucket(region)
-    upload_script_to_bucket(scanning_script_name)
-    upload_script_to_bucket(install_ntfs_3g_script_name)
-    install_searching_tools(instance_id_secret_searcher, region)
-
-    instance = start_instance_with_target_ami(target_ami, region)
-    stop_instance([instance['instanceId']], region)
-
-    volume_ids = []
+    start_scan_time = time.time()
 
     try:
+        log_warning("If ran in an EC2 instance, make sure it has the required permissions to execute the tool")
+        target_ami = get_ami(args.ami_id, region)
+
+        instance_profile_arn_secret_searcher = get_instance_profile_secret_searcher(region)
+        instance_id_secret_searcher = create_secret_searcher(region, instance_profile_arn_secret_searcher)
+        create_s3_bucket(region)
+        upload_script_to_bucket(scanning_script_name)
+
+        is_windows = 'Platform' in target_ami and target_ami['Platform'] == 'windows'
+        if is_windows:
+            upload_script_to_bucket(install_ntfs_3g_script_name)
+
+        install_searching_tools(instance_id_secret_searcher, region, is_windows)
+
+        instance = start_instance_with_target_ami(target_ami, region)
+        stop_instance([instance['instanceId']], region)
+
+        volume_ids = []
         searched = False
+
         volume_ids = move_volumes_and_terminate_instance(instance['instanceId'], instance_id_secret_searcher, instance['ami'], region)
         start_scan_time = time.time()
         start_digging_for_secrets(instance_id_secret_searcher, instance['ami'], region)
@@ -537,22 +550,21 @@ def dig(args, session):
         searched = True
         delete_volumes(volume_ids, region)
     except Exception as e:
-        log_error(f'Exception occurred for ami {target_ami} in EC2 instance {instance}')
+        log_error(f'Exception occurred for ami {target_ami}')
 
         log_error(f'Error: {e}')
 
-        if searched == False:
+        if searched == False and len(volume_ids) > 0:
             delete_volumes(volume_ids, region)
-        else:
+        elif len(volume_ids) > 0:
             log_error("An error occurred while deleting the volumes. Please check manually what happened.")
     else:
         upload_results(instance_id_secret_searcher, instance['ami'], region)
+        log_success(f'Total duration for ami {target_ami['ImageId']}: {int((time.time() - start_scan_time))} seconds\n')
+        log_success(f'Scan finished. Check results in s3://{s3_bucket_name}')
+    finally:
+        cleanup(region)
             
-    log_success(f'Total duration for ami {target_ami}: {int((time.time() - start_scan_time))} seconds\n')
-
-    cleanup(region)
-    log_success(f'Scan finished. Check results in s3://{s3_bucket_name}')
-
 
 if __name__ == '__main__':
     dig()
