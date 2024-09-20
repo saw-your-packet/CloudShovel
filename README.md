@@ -1,6 +1,17 @@
 ## Introduction
 
-CloudShovel is a tool designed to search for sensitive information within public Amazon Machine Images (AMIs). It automates the process of launching instances from target AMIs, mounting their volumes, and scanning for potential secrets or sensitive data.
+CloudShovel is a tool designed to search for sensitive information within public or private Amazon Machine Images (AMIs). It automates the process of launching instances from target AMIs, mounting their volumes, and scanning for potential secrets or sensitive data.
+
+The tool is a modified version of what was used for the research [AWS CloudQuarry: Digging for Secrets in Public AMIs](https://securitycafe.ro/2024/05/08/aws-cloudquarry-digging-for-secrets-in-public-amis/)
+
+Authors:
+- [Eduard Agavriloae](https://www.linkedin.com/in/eduard-k-agavriloae/) - [hacktodef.com](https://hacktodef.com)
+- [Matei Josephs](https://www.linkedin.com/in/l31/) - [hivehack.tech](https://hivehack.tech)
+
+
+**Disclaimer**
+
+> This is not a tool that will fit all scenarios. There will be errors when starting an EC2 instance based on the target AMI or when trying to mount the volumes. We accept pull requests for covering more cases, but our recommendation is to manually try to handle those cases.
 
 Table of Contents:
 
@@ -11,6 +22,7 @@ Table of Contents:
   - [Manually](#manually)
 - [Usage](#usage)
 - [How It Works](#how-it-works)
+- [Customizing scanning](#customizing-scanning)
 - [Resources Created](#resources-created)
 - [Required Permissions](#required-permissions)
 - [Cleaning Up](#cleaning-up)
@@ -109,6 +121,28 @@ CloudShovel operates through the following steps:
    - Detaches and deletes the volumes from the target AMI.
    - Terminates instances and removes created IAM resources.
 
+## Customizing scanning
+
+By default, the tool will execute the next command to search for files and folders that might be of interest: 
+
+```bash
+for item in $(find . \( ! -path "./Windows/*" -a ! -path "./Program Files/*" -a ! -path "./Program Files (x86)/*" \) -size -25M \
+            \( -name ".aws" -o -name ".ssh" -o -name "credentials.xml" \
+            -o -name "secrets.yml" -o -name "config.php" -o -name "_history" \
+            -o -name "autologin.conf" -o -name "web.config" -o -name ".env" \
+            -o -name ".git" \) -not -empty)
+   do
+      echo "[+] Found $item. Copying to output..."
+      save_name_item=${item:1}
+      save_name_item=${save_name_item////\\}
+      cp -r $item /home/ec2-user/OUTPUT/$counter/${save_name_item}
+   done
+```
+
+The full code can be found in `src\cloudshovel\utils\bash_scripts\mount_and_dig.sh`. Feel free to modify the function and search for other files or folders, increase the file size limit or exclude additional folders from the search.
+
+You can also modify the function and replace the usage of `find` with `trufflehog` or `linpeas`. The difference is that using find takes about 1 minute to execute whereas other scanning alternatives might take tens of minutes or hours depending on volume size.
+
 ## Resources Created
 
 CloudShovel creates the following AWS resources during its operation:
@@ -122,7 +156,7 @@ CloudShovel creates the following AWS resources during its operation:
 
 ## Required Permissions
 
-To run CloudShovel, your AWS account or IAM user needs the following permissions:
+To run CloudShovel, your AWS account or IAM identity needs the following permissions:
 
 - EC2:
   - Describe, run, stop, and terminate instances
@@ -146,7 +180,7 @@ CloudShovel attempts to clean up all created resources after completion or in ca
 
 - Check the EC2 console for any running instances tagged with "usage: CloudQuarry" or "usage: SecretSearcher".
 - Verify that the IAM role and instance profile "minimal-ssm" have been deleted.
-- The S3 bucket is not automatically deleted to preserve results. Delete it manually if no longer needed.
+- The S3 bucket **is not** automatically deleted to preserve results. Delete it manually if no longer needed.
 
 ## Troubleshooting
 
@@ -154,4 +188,4 @@ CloudShovel attempts to clean up all created resources after completion or in ca
 - For permission-related errors, verify that your AWS credentials have all the required permissions listed above.
 - If experiencing issues with specific AMIs, check their requirements (e.g., virtualization type, ENA support) and adjust the instance types in the script accordingly.
 
-Remember to use this tool responsibly and ensure you have the right to scan the AMIs you're targeting.
+Use this tool responsibly and ensure you have the right to scan the AMIs you're targeting.

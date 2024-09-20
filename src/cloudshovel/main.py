@@ -1,10 +1,17 @@
 import argparse
 import boto3
 import botocore
+from pyfiglet import figlet_format
 from cloudshovel.utils.digger import dig, log_error, log_warning
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="CloudShovel: Digging for secrets in public AMIs")
+    parser = argparse.ArgumentParser()
+
+    print(figlet_format('CloudShovel', font='rectangles'))
+
+    print("Authors:")
+    print("\t- Eduard Agavriloae / @saw_your_packet / hacktodef.com")
+    print("\t- Matei Josephs / hivehack.tech\n")
 
     # Positional argument for AMI ID (without a flag)
     parser.add_argument("ami_id", help="AWS AMI ID to launch")
