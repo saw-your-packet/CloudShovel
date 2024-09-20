@@ -56,3 +56,4 @@ src/testTestingRootWkspc/coverageWorkspace/.coverage
 .vscode/launch.json
 /cloudshovel.egg-info
 /src/cloudshovel.egg-info
+/build
