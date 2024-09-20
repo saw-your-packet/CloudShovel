@@ -26,23 +26,12 @@ check_and_fix_uuid() {
             echo "[!] UUID collision detected for $dev"
             echo "[*] Generating new UUID for $dev"
             
-            # Unmount the device if it's mounted
-            mountpoint=$(lsblk -no MOUNTPOINT $dev)
-            if [ -n "$mountpoint" ]; then
-                umount $dev
-            fi
-            
             # Generate new UUID
             xfs_admin -U generate $dev
             
             # Get the new UUID
             new_uuid=$(blkid -s UUID -o value $dev)
             echo "[*] New UUID for $dev: $new_uuid"
-            
-            # Remount if it was previously mounted
-            if [ -n "$mountpoint" ]; then
-                mount $dev $mountpoint
-            fi
         fi
     fi
 }
@@ -55,10 +44,7 @@ mount_and_search(){
 
     dev=$1
     echo "[x] Trying to mount $dev"
-    
-    # Check and fix UUID if necessary
-    check_and_fix_uuid $dev
-    
+
     # Check if the filesystem is NTFS
     fs_type=$(blkid -o value -s TYPE $dev)
     if [ "$fs_type" == "ntfs" ]; then
@@ -73,6 +59,10 @@ mount_and_search(){
             return 1
         fi
     elif [ "$fs_type" == "xfs" ]; then
+        echo "[x] XFS filesystem detected."
+        # Check and fix UUID if necessary
+        check_and_fix_uuid $dev
+
         mount_point="/mnt/xfs_$RANDOM"
         mkdir -p $mount_point
         if mount -t xfs $dev $mount_point; then
