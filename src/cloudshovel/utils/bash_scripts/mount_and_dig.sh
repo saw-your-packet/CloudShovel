@@ -12,6 +12,9 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Installing udisksctl
+yum install udisks2 -y
+
 check_and_fix_uuid() {
     local dev=$1
     local uuid=$(blkid -s UUID -o value $dev)

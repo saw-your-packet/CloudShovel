@@ -21,9 +21,10 @@ devices = ['/dev/sdf',
            '/dev/sdo',
            '/dev/sdp']
 
-# list of objects of the form {'/dev/sdf':'ami-123456'} to keep track of what device is from what ami
+# list of objects of the form {'/dev/sdf':'ami-123456'} to keep track of what device in use
 in_use_devices = {}
 s3_bucket_name = ''
+s3_bucket_region = ''
 scanning_script_name = 'mount_and_dig.sh'
 install_ntfs_3g_script_name = 'install_ntfs_3g.sh'
 boto3_session = None
@@ -61,6 +62,7 @@ def get_ami(ami_id, region):
         cleanup(region)
         exit()
 
+
 def create_s3_bucket(region):
     log_success(f'Checking if S3 bucket {s3_bucket_name} exists...')
     s3 = boto3_session.client('s3')
@@ -69,12 +71,14 @@ def create_s3_bucket(region):
     for bucket in buckets:
         if bucket['Name'] == s3_bucket_name:
             log_success(f'Bucket {s3_bucket_name} exists in current AWS account')
+            set_bucket_region(s3_bucket_name)
             return
     
     try:
         log_warning('Bucket not found. Creating...')
         response = s3.create_bucket(Bucket=s3_bucket_name, CreateBucketConfiguration={'LocationConstraint': region})
         log_success(f'Bucket created: {response["Location"]}')
+        set_bucket_region(s3_bucket_name)
     except  ClientError as e:
         error_code = e.response['Error']['Code']
         if error_code == 'BucketAlreadyExists':
@@ -85,9 +89,24 @@ def create_s3_bucket(region):
             log_error('Unknown error occurred. Execution might continue as expected...')
 
 
+def set_bucket_region(bucket_name):
+    s3 = boto3_session.client('s3')
+    
+    try:
+        response = s3.get_bucket_location(Bucket=bucket_name)
+        region = response['LocationConstraint']
+        
+        # AWS returns None for buckets in us-east-1 instead of 'us-east-1'
+        global s3_bucket_region
+        s3_bucket_region = region if region else 'us-east-1'
+    
+    except Exception as e:
+        log_error(f"An error occurred: {e}")
+        return None
+
 def upload_script_to_bucket(script_name):
     log_success(f'Checking if script {script_name} is already inside the bucket {s3_bucket_name}...')
-    s3 = boto3_session.client('s3')
+    s3 = boto3_session.client('s3', region_name=s3_bucket_region)
     response = s3.list_objects_v2(Bucket=s3_bucket_name, Prefix=script_name)
 
     if 'Contents' in response:
@@ -199,7 +218,7 @@ def create_secret_searcher(region, instance_profile_arn):
         return instance_id
 
     log_warning('No secret searcher instance found. Starting creation process...')
-    log_success('Getting AMI for Amazon Linux 2023 for current region...')
+    log_success('Getting AMI for latest Amazon Linux 202* for current region...')
 
     response = ec2.describe_images(Filters=[{'Name':'name','Values':['al202*-ami-202*-x86_64']}],
                                      Owners=['amazon'])
@@ -242,7 +261,7 @@ def install_searching_tools(instance_id, region, is_windows=False):
                                 DocumentName='AWS-RunRemoteScript',
                                 Parameters={
                                     'sourceType': ['S3'],
-                                    'sourceInfo': [f'{{"path":"https://{s3_bucket_name}.s3.{region}.amazonaws.com/{install_ntfs_3g_script_name}"}}'],
+                                    'sourceInfo': [f'{{"path":"https://{s3_bucket_name}.s3.{s3_bucket_region}.amazonaws.com/{install_ntfs_3g_script_name}"}}'],
                                     'commandLine': [f'bash /home/ec2-user/{install_ntfs_3g_script_name}'],
                                     'workingDirectory': ['/home/ec2-user/']
                                     })
@@ -260,7 +279,7 @@ def install_searching_tools(instance_id, region, is_windows=False):
             exit()
 
     log_success(f'Copying {scanning_script_name} from S3 bucket {s3_bucket_name} to Secret Searcher instance {instance_id} using SSM...')
-    bash_command = f"if test -f /home/ec2-user/{scanning_script_name}; then echo '[INFO] Script already present on disk';else aws --region {region} s3 cp s3://{s3_bucket_name}/{scanning_script_name} /home/ec2-user/{scanning_script_name} && chmod +x /home/ec2-user/{scanning_script_name}; fi"
+    bash_command = f"if test -f /home/ec2-user/{scanning_script_name}; then echo '[INFO] Script already present on disk';else aws --region {s3_bucket_region} s3 cp s3://{s3_bucket_name}/{scanning_script_name} /home/ec2-user/{scanning_script_name} && chmod +x /home/ec2-user/{scanning_script_name}; fi"
     command = ssm.send_command(InstanceIds=[instance_id],
                             DocumentName='AWS-RunShellScript',
                             Parameters={'commands':[bash_command]})
@@ -440,7 +459,7 @@ def upload_results(instance_id_secret_searcher, target_ami, region):
     ssm = boto3_session.client('ssm', region)
     command = ssm.send_command(InstanceIds=[instance_id_secret_searcher],
                         DocumentName='AWS-RunShellScript',
-                        Parameters={'commands':[f'aws --region {region} s3 sync /home/ec2-user/OUTPUT/ s3://{s3_bucket_name}/{region}/{target_ami}/', 'rm -rf /home/ec2-user/OUTPUT/']})
+                        Parameters={'commands':[f'aws --region {s3_bucket_region} s3 sync /home/ec2-user/OUTPUT/ s3://{s3_bucket_name}/{region}/{target_ami}/', 'rm -rf /home/ec2-user/OUTPUT/']})
     
     log_success(f'Upload started. Waiting for upload to complete (this might take a while)...')
     waiter = ssm.get_waiter('command_executed')
@@ -520,7 +539,9 @@ def dig(args, session):
     global s3_bucket_name
     s3_bucket_name = args.bucket
     region = args.region
+    searched = False
     start_scan_time = time.time()
+    volume_ids = []
 
     try:
         log_warning("If ran in an EC2 instance, make sure it has the required permissions to execute the tool")
@@ -539,9 +560,6 @@ def dig(args, session):
 
         instance = start_instance_with_target_ami(target_ami, region)
         stop_instance([instance['instanceId']], region)
-
-        volume_ids = []
-        searched = False
 
         volume_ids = move_volumes_and_terminate_instance(instance['instanceId'], instance_id_secret_searcher, instance['ami'], region)
         start_scan_time = time.time()

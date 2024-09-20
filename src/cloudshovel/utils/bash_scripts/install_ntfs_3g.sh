@@ -1,7 +1,5 @@
 #!/bin/bash
 
-yum install udisks2 -y
-
 if test -f /usr/local/bin/ntfs-3g.probe; then
     echo "[x] Library ntfs-3g already installed"
     exit
