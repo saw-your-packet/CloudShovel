@@ -1,7 +1,6 @@
 import json
 import time
-import concurrent
-import boto3
+from pathlib import Path
 from datetime import datetime
 from botocore.exceptions import ClientError
 from colorama import init, Fore, Style
@@ -115,7 +114,9 @@ def upload_script_to_bucket(script_name):
     
     log_warning(f'Script {script_name} not found in bucket {s3_bucket_name}. Uploading...')
 
-    f = open(f'src/cloudshovel/utils/bash_scripts/{script_name}')
+    base_path = Path(__file__).parent
+    
+    f = open(f'{base_path}\\bash_scripts\\{script_name}')
     script = f.read()
     f.close()
 

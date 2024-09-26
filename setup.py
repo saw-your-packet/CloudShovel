@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="cloudshovel",
-    version="1.0.0",
+    version="1.0.1",
     author="Eduard Agavriloae",
     author_email="eduard.agavriloae@hacktodef.com",
     description="A tool for digging secrets in public AMIs",
